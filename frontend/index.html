@@ -1,0 +1,2392 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-slate-950">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Assignment Submission and Tracking System</title>
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Plus Jakarta Sans', 'Outfit', 'sans-serif'],
+                        display: ['Outfit', 'sans-serif'],
+                    },
+                }
+            }
+        }
+    </script>
+    
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- React and ReactDOM CDNs -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    
+    <!-- Babel compiler for on-the-fly JSX compilation -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <style>
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            background: radial-gradient(circle at top left, #1e1b4b, #090514 60%);
+        }
+        .glass-panel {
+            background: rgba(15, 23, 42, 0.65);
+            backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        .glass-card {
+            background: rgba(30, 41, 59, 0.45);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .glass-card:hover {
+            transform: translateY(-2px);
+            background: rgba(30, 41, 59, 0.6);
+            border-color: rgba(99, 102, 241, 0.2);
+            box-shadow: 0 10px 20px -10px rgba(99, 102, 241, 0.25);
+        }
+        .btn-gradient {
+            background: linear-gradient(135deg, #6366f1, #a855f7);
+            transition: all 0.3s ease;
+        }
+        .btn-gradient:hover {
+            opacity: 0.95;
+            box-shadow: 0 0 15px rgba(99, 102, 241, 0.5);
+            transform: translateY(-1px);
+        }
+        /* Custom scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #020617;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #334155;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #475569;
+        }
+    </style>
+</head>
+<body class="h-full text-slate-100 flex flex-col antialiased">
+    <div id="root" class="h-full flex flex-col"></div>
+
+    <script id="react-src" type="text/plain">
+        const { useState, useEffect } = React;
+
+        const API_URL = "http://localhost:8080/api";
+
+        function App() {
+            const [session, setSession] = useState(() => {
+                try {
+                    const saved = localStorage.getItem("user_session");
+                    return saved ? JSON.parse(saved) : null;
+                } catch (e) {
+                    console.warn("localStorage not available:", e);
+                    return null;
+                }
+            });
+            const [view, setView] = useState("login"); // login, dashboard, classes, users, submissions
+            const [currentAssignmentId, setCurrentAssignmentId] = useState(null); // for teacher view submissions
+            const [alert, setAlert] = useState(null); // { type: 'success'|'error', message: '' }
+            const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
+
+            useEffect(() => {
+                if (session) {
+                    setView("dashboard");
+                } else {
+                    setView("login");
+                }
+            }, [session]);
+
+            const showAlert = (message, type = "success") => {
+                setAlert({ message, type });
+                setTimeout(() => setAlert(null), 5000);
+            };
+
+            const handleLoginSuccess = (sessionData) => {
+                try {
+                    localStorage.setItem("user_session", JSON.stringify(sessionData));
+                } catch (e) {
+                    console.warn("Could not save session to localStorage:", e);
+                }
+                setSession(sessionData);
+                showAlert("Welcome back, " + sessionData.displayName + "!");
+            };
+
+            const handleLogout = async () => {
+                if (session) {
+                    try {
+                        await fetch(`${API_URL}/auth/logout`, {
+                            method: "POST",
+                            headers: { "Authorization": `Bearer ${session.token}` }
+                        });
+                    } catch (e) {}
+                }
+                try {
+                    localStorage.removeItem("user_session");
+                } catch (e) {}
+                setSession(null);
+                setView("login");
+                showAlert("Logged out successfully.");
+            };
+
+            const apiCall = async (endpoint, method = "GET", body = null) => {
+                const headers = {
+                    "Content-Type": "application/json",
+                };
+                if (session) {
+                    headers["Authorization"] = `Bearer ${session.token}`;
+                }
+                const config = { method, headers };
+                if (body) {
+                    config.body = JSON.stringify(body);
+                }
+                const response = await fetch(`${API_URL}${endpoint}`, config);
+                if (response.status === 401) {
+                    handleLogout();
+                    throw new Error("Session expired. Please log in again.");
+                }
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.error || "An error occurred");
+                }
+                return data;
+            };
+
+            return (
+                <div className="min-h-full flex flex-col relative">
+                    {/* Floating Alert */}
+                    {alert && (
+                        <div className={`fixed top-5 right-5 z-50 flex items-center p-4 rounded-lg shadow-lg border backdrop-blur-md transition-all duration-300 transform translate-y-0 ${
+                            alert.type === 'error' 
+                                ? 'bg-red-950/80 border-red-500/30 text-red-200' 
+                                : 'bg-green-950/80 border-green-500/30 text-green-200'
+                        }`}>
+                            <i className={`fa-solid ${alert.type === 'error' ? 'fa-circle-xmark text-red-500' : 'fa-circle-check text-green-500'} mr-3 text-lg`}></i>
+                            <span className="font-medium text-sm">{alert.message}</span>
+                            <button onClick={() => setAlert(null)} className="ml-4 text-slate-400 hover:text-slate-200 focus:outline-none">
+                                <i className="fa-solid fa-xmark"></i>
+                            </button>
+                        </div>
+                    )}
+
+                    {session && (
+                        <Navbar 
+                            session={session} 
+                            view={view} 
+                            setView={setView} 
+                            onLogout={handleLogout} 
+                            onChangePasswordOpen={() => setIsChangePasswordOpen(true)}
+                        />
+                    )}
+
+                    <main className="flex-grow max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
+                        {view === "login" && (
+                            <Login onLoginSuccess={handleLoginSuccess} showAlert={showAlert} />
+                        )}
+                        {view === "dashboard" && session && session.role === "ADMIN" && (
+                            <AdminDashboard apiCall={apiCall} setView={setView} showAlert={showAlert} />
+                        )}
+                        {view === "classes" && session && session.role === "ADMIN" && (
+                            <ClassManagement apiCall={apiCall} showAlert={showAlert} />
+                        )}
+                        {view === "users" && session && session.role === "ADMIN" && (
+                            <UserManagement apiCall={apiCall} showAlert={showAlert} />
+                        )}
+                        {view === "dashboard" && session && session.role === "TEACHER" && (
+                            <TeacherDashboard 
+                                apiCall={apiCall} 
+                                setView={setView} 
+                                setCurrentAssignmentId={setCurrentAssignmentId}
+                                showAlert={showAlert} 
+                            />
+                        )}
+                        {view === "submissions" && session && session.role === "TEACHER" && (
+                            <TeacherSubmissions 
+                                apiCall={apiCall} 
+                                assignmentId={currentAssignmentId} 
+                                setView={setView}
+                                showAlert={showAlert}
+                                session={session}
+                            />
+                        )}
+                        {view === "dashboard" && session && session.role === "STUDENT" && (
+                            <StudentDashboard apiCall={apiCall} showAlert={showAlert} session={session} />
+                        )}
+                    </main>
+
+                    {/* Change Password Modal */}
+                    {isChangePasswordOpen && (
+                        <ChangePasswordModal 
+                            apiCall={apiCall} 
+                            onClose={() => setIsChangePasswordOpen(false)} 
+                            showAlert={showAlert} 
+                        />
+                    )}
+
+                    <footer className="border-t border-slate-900 bg-slate-950/40 py-6 text-center text-slate-500 text-xs mt-auto">
+                        <p>© 2026 Smart Assignment Submission & Tracking System. Built with Core Java & React.js.</p>
+                    </footer>
+                </div>
+            );
+        }
+
+        // =========================================================================
+        // NAVIGATION COMPONENT
+        // =========================================================================
+        function Navbar({ session, view, setView, onLogout, onChangePasswordOpen }) {
+            return (
+                <nav className="glass-panel sticky top-0 z-40 border-b border-slate-900 bg-slate-950/80 shadow-md">
+                    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                        <div className="flex items-center justify-between h-16">
+                            <div className="flex items-center">
+                                <div className="flex-shrink-0 flex items-center cursor-pointer" onClick={() => setView("dashboard")}>
+                                    <div className="h-9 w-9 rounded-lg bg-indigo-600 flex items-center justify-center mr-2 shadow-lg shadow-indigo-500/20">
+                                        <i className="fa-solid fa-graduation-cap text-lg text-white"></i>
+                                    </div>
+                                    <span className="text-xl font-bold font-display bg-gradient-to-r from-indigo-400 via-purple-400 to-pink-400 bg-clip-text text-transparent">SmartAssignment</span>
+                                </div>
+                                <div className="hidden md:block ml-10">
+                                    <div className="flex items-baseline space-x-4">
+                                        <button onClick={() => setView("dashboard")} className={`px-3 py-2 rounded-md text-sm font-semibold transition-colors ${view === 'dashboard' ? 'bg-indigo-950/50 text-indigo-300 border border-indigo-500/20' : 'text-slate-300 hover:text-white'}`}>
+                                            <i className="fa-solid fa-chart-line mr-1.5"></i> Dashboard
+                                        </button>
+                                        {session.role === "ADMIN" && (
+                                            <>
+                                                <button onClick={() => setView("classes")} className={`px-3 py-2 rounded-md text-sm font-semibold transition-colors ${view === 'classes' ? 'bg-indigo-950/50 text-indigo-300 border border-indigo-500/20' : 'text-slate-300 hover:text-white'}`}>
+                                                    <i className="fa-solid fa-school mr-1.5"></i> Classes
+                                                </button>
+                                                <button onClick={() => setView("users")} className={`px-3 py-2 rounded-md text-sm font-semibold transition-colors ${view === 'users' ? 'bg-indigo-950/50 text-indigo-300 border border-indigo-500/20' : 'text-slate-300 hover:text-white'}`}>
+                                                    <i className="fa-solid fa-users mr-1.5"></i> Users
+                                                </button>
+                                            </>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="flex items-center space-x-4">
+                                <div className="hidden sm:flex items-center mr-2">
+                                    <div className="text-right">
+                                        <div className="text-sm font-bold text-slate-200">{session.displayName}</div>
+                                        <div className="text-xs text-indigo-400 font-semibold">{session.role}</div>
+                                    </div>
+                                    <div className="h-9 w-9 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center ml-3 text-slate-300 font-bold font-display text-sm">
+                                        {session.displayName.substring(0, 2).toUpperCase()}
+                                    </div>
+                                </div>
+                                <button onClick={onChangePasswordOpen} title="Change Password" className="p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-900 rounded-lg transition-colors">
+                                    <i className="fa-solid fa-key"></i>
+                                </button>
+                                <button onClick={onLogout} title="Logout" className="p-2 text-red-400 hover:text-red-300 hover:bg-slate-900/50 rounded-lg transition-colors border border-transparent hover:border-red-900/20">
+                                    <i className="fa-solid fa-sign-out-alt"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </nav>
+            );
+        }
+
+        // =========================================================================
+        // LOGIN COMPONENT
+        // =========================================================================
+        function Login({ onLoginSuccess, showAlert }) {
+            const [email, setEmail] = useState("");
+            const [password, setPassword] = useState("");
+            const [role, setRole] = useState("STUDENT");
+            const [loading, setLoading] = useState(false);
+
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                setLoading(true);
+                try {
+                    const response = await fetch(`${API_URL}/auth/login`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ email, password, role })
+                    });
+                    const data = await response.json();
+                    if (!response.ok) {
+                        throw new Error(data.error || "Login failed");
+                    }
+                    onLoginSuccess(data);
+                } catch (err) {
+                    showAlert(err.message, "error");
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            return (
+                <div className="min-h-[75vh] flex flex-col justify-center py-12 sm:px-6 lg:px-8">
+                    <div className="sm:mx-auto sm:w-full sm:max-w-md text-center">
+                        <div className="mx-auto h-12 w-12 rounded-xl bg-indigo-600 flex items-center justify-center shadow-lg shadow-indigo-500/30">
+                            <i className="fa-solid fa-graduation-cap text-2xl text-white"></i>
+                        </div>
+                        <h2 className="mt-6 text-3xl font-extrabold font-display bg-gradient-to-r from-slate-100 via-indigo-200 to-purple-100 bg-clip-text text-transparent">Sign in to your account</h2>
+                        <p className="mt-2 text-sm text-slate-400">Smart Assignment Tracking System</p>
+                    </div>
+
+                    <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
+                        <div className="glass-panel py-8 px-4 sm:rounded-xl sm:px-10 shadow-2xl relative overflow-hidden">
+                            <div className="absolute top-0 left-0 w-full h-[3px] bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500"></div>
+                            
+                            <form className="space-y-6" onSubmit={handleSubmit}>
+                                <div>
+                                    <label className="block text-sm font-semibold text-slate-300">Select Role</label>
+                                    <div className="mt-2 grid grid-cols-3 gap-3">
+                                        {["STUDENT", "TEACHER", "ADMIN"].map((r) => (
+                                            <button
+                                                key={r}
+                                                type="button"
+                                                onClick={() => setRole(r)}
+                                                className={`py-2 px-3 border rounded-lg text-xs font-bold transition-all ${
+                                                    role === r
+                                                        ? "bg-indigo-600/20 border-indigo-500 text-indigo-300 shadow-md shadow-indigo-500/10"
+                                                        : "border-slate-800 bg-slate-950/50 text-slate-400 hover:border-slate-700"
+                                                }`}
+                                            >
+                                                {r}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <label for="email" className="block text-sm font-semibold text-slate-300">Email address</label>
+                                    <div className="mt-1 relative">
+                                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-500">
+                                            <i className="fa-solid fa-envelope"></i>
+                                        </div>
+                                        <input
+                                            id="email"
+                                            name="email"
+                                            type="email"
+                                            required
+                                            value={email}
+                                            onChange={(e) => setEmail(e.target.value)}
+                                            className="block w-full pl-10 pr-3 py-2.5 bg-slate-950/80 border border-slate-800 rounded-lg text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 text-sm"
+                                            placeholder="you@school.com"
+                                        />
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <label for="password" className="block text-sm font-semibold text-slate-300">Password</label>
+                                    <div className="mt-1 relative">
+                                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-500">
+                                            <i className="fa-solid fa-lock"></i>
+                                        </div>
+                                        <input
+                                            id="password"
+                                            name="password"
+                                            type="password"
+                                            required
+                                            value={password}
+                                            onChange={(e) => setPassword(e.target.value)}
+                                            className="block w-full pl-10 pr-3 py-2.5 bg-slate-950/80 border border-slate-800 rounded-lg text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 text-sm"
+                                            placeholder="••••••••"
+                                        />
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <button
+                                        type="submit"
+                                        disabled={loading}
+                                        className="w-full py-2.5 px-4 text-sm font-bold text-white rounded-lg btn-gradient focus:outline-none flex items-center justify-center"
+                                    >
+                                        {loading ? (
+                                            <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                            </svg>
+                                        ) : "Sign In"}
+                                    </button>
+                                </div>
+                            </form>
+
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // =========================================================================
+        // ADMIN DASHBOARD
+        // =========================================================================
+        function AdminDashboard({ apiCall, setView, showAlert }) {
+            const [stats, setStats] = useState(null);
+            const [loading, setLoading] = useState(true);
+
+            useEffect(() => {
+                loadStats();
+            }, []);
+
+            const loadStats = async () => {
+                try {
+                    const data = await apiCall("/admin/dashboard");
+                    setStats(data);
+                } catch (e) {
+                    showAlert(e.message, "error");
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            if (loading) return <Loader />;
+
+            return (
+                <div className="space-y-8">
+                    <div>
+                        <h1 className="text-3xl font-extrabold font-display tracking-tight text-slate-100">Administrator Console</h1>
+                        <p className="text-slate-400 mt-1">Manage system configurations, classrooms, teachers, and students.</p>
+                    </div>
+
+                    {/* Stats Grid */}
+                    <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-5">
+                        <StatCard icon="fa-school text-indigo-400" title="Classrooms" value={stats?.totalClasses} bg="from-indigo-500/10 to-indigo-500/5 border-indigo-500/20" />
+                        <StatCard icon="fa-chalkboard-user text-purple-400" title="Teachers" value={stats?.totalTeachers} bg="from-purple-500/10 to-purple-500/5 border-purple-500/20" />
+                        <StatCard icon="fa-users text-pink-400" title="Students" value={stats?.totalStudents} bg="from-pink-500/10 to-pink-500/5 border-pink-500/20" />
+                        <StatCard icon="fa-file-signature text-blue-400" title="Assignments" value={stats?.totalAssignments} bg="from-blue-500/10 to-blue-500/5 border-blue-500/20" />
+                        <StatCard icon="fa-upload text-green-400" title="Submissions" value={stats?.totalSubmissions} bg="from-green-500/10 to-green-500/5 border-green-500/20" />
+                    </div>
+
+                    {/* Quick Links */}
+                    <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+                        <div className="glass-panel p-6 rounded-xl flex flex-col justify-between">
+                            <div>
+                                <h3 className="text-lg font-bold font-display text-slate-200 flex items-center">
+                                    <i className="fa-solid fa-school text-indigo-500 mr-2"></i> Classroom Management
+                                </h3>
+                                <p className="text-slate-400 text-sm mt-2">Create new academic classes, define sections (e.g. BCA-3A, MCA-1B), set academic years, and monitor active statuses.</p>
+                            </div>
+                            <div className="mt-6">
+                                <button onClick={() => setView("classes")} className="py-2.5 px-4 text-xs font-bold text-white rounded-lg btn-gradient">
+                                    Go to Classrooms
+                                </button>
+                            </div>
+                        </div>
+
+                        <div className="glass-panel p-6 rounded-xl flex flex-col justify-between">
+                            <div>
+                                <h3 className="text-lg font-bold font-display text-slate-200 flex items-center">
+                                    <i className="fa-solid fa-user-gear text-purple-500 mr-2"></i> User Roster Control
+                                </h3>
+                                <p className="text-slate-400 text-sm mt-2">Register teachers and students. Allocate teachers to classrooms, view profile records, and perform password overrides.</p>
+                            </div>
+                            <div className="mt-6">
+                                <button onClick={() => setView("users")} className="py-2.5 px-4 text-xs font-bold text-white rounded-lg btn-gradient">
+                                    Go to User Roster
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* System Logs */}
+                    <div className="glass-panel rounded-xl overflow-hidden">
+                        <div className="px-6 py-4 border-b border-slate-900 flex justify-between items-center">
+                            <h3 className="text-lg font-bold font-display text-slate-200 flex items-center">
+                                <i className="fa-solid fa-history text-slate-400 mr-2"></i> Recent System Activity
+                            </h3>
+                            <button onClick={loadStats} className="text-slate-400 hover:text-white transition-colors">
+                                <i className="fa-solid fa-arrows-rotate"></i>
+                            </button>
+                        </div>
+                        <div className="divide-y divide-slate-900 bg-slate-950/20 max-h-[400px] overflow-y-auto">
+                            {stats?.recentLogs && stats.recentLogs.length > 0 ? (
+                                stats.recentLogs.map((log) => (
+                                    <div key={log.logId} className="px-6 py-3.5 flex items-center justify-between hover:bg-slate-900/30 transition-colors text-xs sm:text-sm">
+                                        <div className="flex items-center space-x-3">
+                                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                                log.actorRole === 'ADMIN' ? 'bg-indigo-600/20 text-indigo-300 border border-indigo-500/20' :
+                                                log.actorRole === 'TEACHER' ? 'bg-purple-600/20 text-purple-300 border border-purple-500/20' :
+                                                'bg-pink-600/20 text-pink-300 border border-pink-500/20'
+                                            }`}>
+                                                {log.actorRole}
+                                            </span>
+                                            <span className="text-slate-400">{log.description}</span>
+                                        </div>
+                                        <div className="text-right text-slate-500 text-xs">
+                                            <div>{log.created_at ? log.created_at.replace("T", " ").substring(0, 19) : ""}</div>
+                                            <div className="text-[10px] text-slate-600 font-mono">{log.ipAddress}</div>
+                                        </div>
+                                    </div>
+                                ))
+                            ) : (
+                                <div className="px-6 py-8 text-center text-slate-500">No recent activity logs available.</div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        function StatCard({ icon, title, value, bg }) {
+            return (
+                <div className={`glass-panel border p-5 rounded-xl flex items-center justify-between bg-gradient-to-br ${bg}`}>
+                    <div className="space-y-1">
+                        <span className="text-slate-400 text-xs font-bold uppercase tracking-wider">{title}</span>
+                        <div className="text-2xl font-bold font-display text-slate-100">{value !== undefined ? value : "..."}</div>
+                    </div>
+                    <div className="h-10 w-10 rounded-lg bg-slate-950/40 flex items-center justify-center shadow-inner">
+                        <i className={`fa-solid ${icon} text-lg`}></i>
+                    </div>
+                </div>
+            );
+        }
+
+        // =========================================================================
+        // CLASSROOM MANAGEMENT
+        // =========================================================================
+        function ClassManagement({ apiCall, showAlert }) {
+            const [classes, setClasses] = useState([]);
+            const [loading, setLoading] = useState(true);
+            const [showModal, setShowModal] = useState(false);
+            const [editingClass, setEditingClass] = useState(null);
+
+            // Form inputs
+            const [className, setClassName] = useState("");
+            const [section, setSection] = useState("");
+            const [academicYear, setAcademicYear] = useState("");
+            const [description, setDescription] = useState("");
+            const [isActive, setIsActive] = useState(true);
+
+            useEffect(() => {
+                loadClasses();
+            }, []);
+
+            const loadClasses = async () => {
+                try {
+                    const data = await apiCall("/admin/classes");
+                    setClasses(data);
+                } catch (e) {
+                    showAlert(e.message, "error");
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const resetForm = () => {
+                setClassName("");
+                setSection("");
+                setAcademicYear("");
+                setDescription("");
+                setIsActive(true);
+                setEditingClass(null);
+            };
+
+            const handleCreateOrUpdate = async (e) => {
+                e.preventDefault();
+                try {
+                    if (editingClass) {
+                        // UPDATE
+                        await apiCall("/admin/classes", "PUT", {
+                            classId: editingClass.classId,
+                            className,
+                            section,
+                            academicYear,
+                            description,
+                            isActive
+                        });
+                        showAlert("Classroom updated successfully!");
+                    } else {
+                        // CREATE
+                        await apiCall("/admin/classes", "POST", {
+                            className,
+                            section,
+                            academicYear,
+                            description
+                        });
+                        showAlert("Classroom created successfully!");
+                    }
+                    setShowModal(false);
+                    resetForm();
+                    loadClasses();
+                } catch (err) {
+                    showAlert(err.message, "error");
+                }
+            };
+
+            const handleEdit = (cls) => {
+                setEditingClass(cls);
+                setClassName(cls.className);
+                setSection(cls.section);
+                setAcademicYear(cls.academicYear);
+                setDescription(cls.description || "");
+                setIsActive(cls.isActive !== false);
+                setShowModal(true);
+            };
+
+            const handleDelete = async (classId) => {
+                if (!confirm("Are you sure you want to delete this classroom? All associated student records and assignments may be impacted.")) {
+                    return;
+                }
+                try {
+                    await apiCall(`/admin/classes?id=${classId}`, "DELETE");
+                    showAlert("Classroom deleted successfully!");
+                    loadClasses();
+                } catch (err) {
+                    showAlert(err.message, "error");
+                }
+            };
+
+            if (loading) return <Loader />;
+
+            return (
+                <div className="space-y-6">
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center space-y-4 sm:space-y-0">
+                        <div>
+                            <h1 className="text-3xl font-extrabold font-display tracking-tight text-slate-100">Classroom Manager</h1>
+                            <p className="text-slate-400 mt-1">Manage classrooms, sections, and academic year mappings.</p>
+                        </div>
+                        <button
+                            onClick={() => { resetForm(); setShowModal(true); }}
+                            className="py-2.5 px-4 text-xs font-bold text-white rounded-lg btn-gradient flex items-center"
+                        >
+                            <i className="fa-solid fa-plus mr-1.5"></i> Add Classroom
+                        </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+                        {classes.length > 0 ? (
+                            classes.map((cls) => (
+                                <div key={cls.classId} className="glass-panel p-6 rounded-xl flex flex-col justify-between relative group">
+                                    <div className="absolute top-4 right-4 flex space-x-2 opacity-60 group-hover:opacity-100 transition-opacity">
+                                        <button onClick={() => handleEdit(cls)} className="p-1.5 bg-slate-800 text-indigo-400 hover:text-indigo-300 rounded hover:bg-slate-700 transition-colors">
+                                            <i className="fa-solid fa-pencil text-xs"></i>
+                                        </button>
+                                        <button onClick={() => handleDelete(cls.classId)} className="p-1.5 bg-slate-800 text-red-400 hover:text-red-300 rounded hover:bg-slate-700 transition-colors">
+                                            <i className="fa-solid fa-trash text-xs"></i>
+                                        </button>
+                                    </div>
+                                    <div className="space-y-3">
+                                        <div className="flex items-center space-x-2">
+                                            <span className={`h-2.5 w-2.5 rounded-full ${cls.active ? 'bg-green-500' : 'bg-red-500'}`} title={cls.active ? 'Active' : 'Inactive'}></span>
+                                            <span className="text-xs text-slate-400 font-bold uppercase tracking-wider">Class ID: #{cls.classId}</span>
+                                        </div>
+                                        <h3 className="text-xl font-bold font-display text-slate-200">{cls.className}</h3>
+                                        <div className="grid grid-cols-2 gap-2 text-sm text-slate-400 bg-slate-950/40 p-3 rounded-lg border border-slate-900">
+                                            <div>
+                                                <span className="block text-[10px] uppercase font-bold text-slate-500">Section</span>
+                                                <span className="text-slate-300 font-semibold">{cls.section}</span>
+                                            </div>
+                                            <div>
+                                                <span className="block text-[10px] uppercase font-bold text-slate-500">Academic Year</span>
+                                                <span className="text-slate-300 font-semibold">{cls.academicYear}</span>
+                                            </div>
+                                        </div>
+                                        {cls.description && (
+                                            <p className="text-xs text-slate-400 line-clamp-2">{cls.description}</p>
+                                        )}
+                                    </div>
+                                </div>
+                            ))
+                        ) : (
+                            <div className="col-span-full glass-panel py-12 text-center text-slate-500 rounded-xl">
+                                <i className="fa-solid fa-school text-4xl text-slate-700 mb-3"></i>
+                                <p>No classrooms available. Click "Add Classroom" to create one.</p>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Class Form Modal */}
+                    {showModal && (
+                        <div className="fixed inset-0 z-50 overflow-y-auto flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
+                            <div className="glass-panel w-full max-w-md rounded-xl shadow-2xl relative overflow-hidden">
+                                <div className="absolute top-0 left-0 w-full h-[3px] bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500"></div>
+                                <div className="px-6 py-5 border-b border-slate-900 flex justify-between items-center bg-slate-950/30">
+                                    <h3 className="text-lg font-bold font-display text-slate-200">
+                                        {editingClass ? "Edit Classroom" : "Create Classroom"}
+                                    </h3>
+                                    <button onClick={() => setShowModal(false)} className="text-slate-400 hover:text-slate-200">
+                                        <i className="fa-solid fa-xmark"></i>
+                                    </button>
+                                </div>
+                                <form onSubmit={handleCreateOrUpdate} className="p-6 space-y-4">
+                                    <div>
+                                        <label className="block text-xs font-bold uppercase tracking-wider text-slate-400">Class Name</label>
+                                        <input
+                                            type="text"
+                                            required
+                                            value={className}
+                                            onChange={(e) => setClassName(e.target.value)}
+                                            placeholder="e.g. BCA, MCA, B.Tech"
+                                            className="mt-1 block w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 text-sm"
+                                        />
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-xs font-bold uppercase tracking-wider text-slate-400">Section</label>
+                                            <input
+                                                type="text"
+                                                required
+                                                value={section}
+                                                onChange={(e) => setSection(e.target.value)}
+                                                placeholder="e.g. A, B, 3A"
+                                                className="mt-1 block w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 text-sm"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-bold uppercase tracking-wider text-slate-400">Academic Year</label>
+                                            <input
+                                                type="text"
+                                                required
+                                                value={academicYear}
+                                                onChange={(e) => setAcademicYear(e.target.value)}
+                                                placeholder="e.g. 2026-2027"
+                                                className="mt-1 block w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 text-sm"
+                                            />
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold uppercase tracking-wider text-slate-400">Description</label>
+                                        <textarea
+                                            value={description}
+                                            onChange={(e) => setDescription(e.target.value)}
+                                            rows="3"
+                                            placeholder="Optional classroom description"
+                                            className="mt-1 block w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 text-sm"
+                                        ></textarea>
+                                    </div>
+                                    {editingClass && (
+                                        <div className="flex items-center space-x-2 pt-2">
+                                            <input
+                                                type="checkbox"
+                                                id="isActive"
+                                                checked={isActive}
+                                                onChange={(e) => setIsActive(e.target.checked)}
+                                                className="h-4 w-4 bg-slate-950 border border-slate-800 rounded text-indigo-600 focus:ring-indigo-500"
+                                            />
+                                            <label for="isActive" className="text-sm font-semibold text-slate-300">Class Active</label>
+                                        </div>
+                                    )}
+                                    <div className="flex justify-end space-x-3 pt-4 border-t border-slate-900 mt-6">
+                                        <button
+                                            type="button"
+                                            onClick={() => setShowModal(false)}
+                                            className="py-2 px-4 bg-slate-900 hover:bg-slate-800 border border-slate-800 text-xs font-bold rounded-lg transition-colors text-slate-400 hover:text-slate-200"
+                                        >
+                                            Cancel
+                                        </button>
+                                        <button
+                                            type="submit"
+                                            className="py-2 px-4 text-xs font-bold text-white rounded-lg btn-gradient"
+                                        >
+                                            {editingClass ? "Save Changes" : "Create"}
+                                        </button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        // =========================================================================
+        // USER ROSTER MANAGEMENT
+        // =========================================================================
+        function UserManagement({ apiCall, showAlert }) {
+            const [usersData, setUsersData] = useState(null);
+            const [loading, setLoading] = useState(true);
+            const [activeTab, setActiveTab] = useState("TEACHER"); // TEACHER or STUDENT
+            const [showModal, setShowModal] = useState(false);
+            const [editingUser, setEditingUser] = useState(null);
+
+            // Form inputs
+            const [fullName, setFullName] = useState("");
+            const [email, setEmail] = useState("");
+            const [phone, setPhone] = useState("");
+            const [password, setPassword] = useState("");
+            
+            // Teacher-specific
+            const [subject, setSubject] = useState("");
+            const [employeeCode, setEmployeeCode] = useState("");
+            const [assignedClasses, setAssignedClasses] = useState([]); // array of classId integers
+            
+            // Student-specific
+            const [rollNumber, setRollNumber] = useState("");
+            const [classId, setClassId] = useState("");
+            const [isActive, setIsActive] = useState(true);
+
+            useEffect(() => {
+                loadUsers();
+            }, []);
+
+            const loadUsers = async () => {
+                try {
+                    const data = await apiCall("/admin/users");
+                    setUsersData(data);
+                } catch (e) {
+                    showAlert(e.message, "error");
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const resetForm = () => {
+                setFullName("");
+                setEmail("");
+                setPhone("");
+                setPassword("");
+                setSubject("");
+                setEmployeeCode("");
+                setAssignedClasses([]);
+                setRollNumber("");
+                setClassId("");
+                setIsActive(true);
+                setEditingUser(null);
+            };
+
+            const handleCreateOrUpdate = async (e) => {
+                e.preventDefault();
+                try {
+                    const payload = {
+                        role: activeTab,
+                        fullName,
+                        email,
+                        phone,
+                        isActive
+                    };
+
+                    if (password) {
+                        payload.password = password;
+                    }
+
+                    if (activeTab === "TEACHER") {
+                        payload.subject = subject;
+                        payload.employeeCode = employeeCode;
+                        payload.assignedClasses = assignedClasses;
+                    } else {
+                        payload.rollNumber = rollNumber;
+                        payload.classId = parseInt(classId);
+                    }
+
+                    if (editingUser) {
+                        payload.userId = activeTab === "TEACHER" ? editingUser.teacherId : editingUser.studentId;
+                        await apiCall("/admin/users", "PUT", payload);
+                        showAlert(`${activeTab === 'TEACHER' ? 'Teacher' : 'Student'} updated successfully!`);
+                    } else {
+                        if (!password) {
+                            showAlert("Password is required for new users.", "error");
+                            return;
+                        }
+                        payload.password = password;
+                        await apiCall("/admin/users", "POST", payload);
+                        showAlert(`${activeTab === 'TEACHER' ? 'Teacher' : 'Student'} registered successfully!`);
+                    }
+                    setShowModal(false);
+                    resetForm();
+                    loadUsers();
+                } catch (err) {
+                    showAlert(err.message, "error");
+                }
+            };
+
+            const handleEdit = (user) => {
+                setEditingUser(user);
+                setFullName(user.fullName);
+                setEmail(user.email);
+                setPhone(user.phone || "");
+                setIsActive(user.active !== false);
+
+                if (activeTab === "TEACHER") {
+                    setSubject(user.subject || "");
+                    setEmployeeCode(user.employeeCode || "");
+                    setAssignedClasses(user.assignedClasses || []);
+                } else {
+                    setRollNumber(user.rollNumber || "");
+                    setClassId(user.classId || "");
+                }
+                setShowModal(true);
+            };
+
+            const handleDelete = async (userId) => {
+                if (!confirm(`Are you sure you want to delete this ${activeTab.toLowerCase()}? This action is permanent.`)) {
+                    return;
+                }
+                try {
+                    await apiCall(`/admin/users?id=${userId}&role=${activeTab}`, "DELETE");
+                    showAlert("User deleted successfully!");
+                    loadUsers();
+                } catch (err) {
+                    showAlert(err.message, "error");
+                }
+            };
+
+            const handleResetPassword = async (userId) => {
+                if (!confirm("Are you sure you want to override and reset this user's password?")) {
+                    return;
+                }
+                try {
+                    const resp = await apiCall("/admin/reset-password", "POST", {
+                        targetUserId: userId,
+                        targetRole: activeTab
+                    });
+                    alert(`Password reset successful!\nTemporary Password: ${resp.tempPassword}\nPlease copy this temporary password and hand it to the user.`);
+                    showAlert("Temporary password generated!");
+                } catch (err) {
+                    showAlert(err.message, "error");
+                }
+            };
+
+            const toggleClassAssignment = (cid) => {
+                if (assignedClasses.includes(cid)) {
+                    setAssignedClasses(assignedClasses.filter(id => id !== cid));
+                } else {
+                    setAssignedClasses([...assignedClasses, cid]);
+                }
+            };
+
+            if (loading) return <Loader />;
+
+            const teachers = usersData?.teachers || [];
+            const students = usersData?.students || [];
+            const classes = usersData?.classes || [];
+
+            // Map classIds to human-readable names
+            const classLookup = {};
+            classes.forEach(c => {
+                classLookup[c.classId] = `${c.className} (${c.section})`;
+            });
+
+            return (
+                <div className="space-y-6">
+                    {/* Header */}
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center space-y-4 sm:space-y-0">
+                        <div>
+                            <h1 className="text-3xl font-extrabold font-display tracking-tight text-slate-100">User Roster Controller</h1>
+                            <p className="text-slate-400 mt-1">Register accounts, allocate classes, and override credentials.</p>
+                        </div>
+                        <button
+                            onClick={() => { resetForm(); setShowModal(true); }}
+                            className="py-2.5 px-4 text-xs font-bold text-white rounded-lg btn-gradient flex items-center"
+                        >
+                            <i className="fa-solid fa-user-plus mr-1.5"></i> Register {activeTab === "TEACHER" ? "Teacher" : "Student"}
+                        </button>
+                    </div>
+
+                    {/* Role Tabs */}
+                    <div className="flex border-b border-slate-900 space-x-6 text-sm">
+                        <button
+                            onClick={() => { setActiveTab("TEACHER"); resetForm(); }}
+                            className={`pb-3 font-semibold transition-colors relative ${
+                                activeTab === "TEACHER" 
+                                    ? "text-indigo-400" 
+                                    : "text-slate-400 hover:text-slate-200"
+                            }`}
+                        >
+                            <i className="fa-solid fa-chalkboard-user mr-1.5"></i> Teachers ({teachers.length})
+                            {activeTab === "TEACHER" && (
+                                <div className="absolute bottom-0 left-0 w-full h-[2px] bg-indigo-500"></div>
+                            )}
+                        </button>
+                        <button
+                            onClick={() => { setActiveTab("STUDENT"); resetForm(); }}
+                            className={`pb-3 font-semibold transition-colors relative ${
+                                activeTab === "STUDENT" 
+                                    ? "text-indigo-400" 
+                                    : "text-slate-400 hover:text-slate-200"
+                            }`}
+                        >
+                            <i className="fa-solid fa-users mr-1.5"></i> Students ({students.length})
+                            {activeTab === "STUDENT" && (
+                                <div className="absolute bottom-0 left-0 w-full h-[2px] bg-indigo-500"></div>
+                            )}
+                        </button>
+                    </div>
+
+                    {/* Roster Table */}
+                    <div className="glass-panel rounded-xl overflow-hidden shadow-xl">
+                        <div className="overflow-x-auto">
+                            {activeTab === "TEACHER" ? (
+                                <table className="min-w-full divide-y divide-slate-900 text-left text-sm">
+                                    <thead className="bg-slate-950/50 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                                        <tr>
+                                            <th className="px-6 py-4">Emp Code / Name</th>
+                                            <th className="px-6 py-4">Email / Phone</th>
+                                            <th className="px-6 py-4">Specialization</th>
+                                            <th className="px-6 py-4">Allocated Classes</th>
+                                            <th className="px-6 py-4 text-center">Status</th>
+                                            <th className="px-6 py-4 text-right">Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-900 bg-slate-950/10">
+                                        {teachers.length > 0 ? (
+                                            teachers.map((t) => (
+                                                <tr key={t.teacherId} className="hover:bg-slate-900/30 transition-colors">
+                                                    <td className="px-6 py-4">
+                                                        <div className="font-bold text-slate-200">{t.fullName}</div>
+                                                        <div className="text-xs text-indigo-400 font-mono mt-0.5">{t.employeeCode || "N/A"}</div>
+                                                    </td>
+                                                    <td className="px-6 py-4">
+                                                        <div className="text-slate-300">{t.email}</div>
+                                                        <div className="text-xs text-slate-500 mt-0.5">{t.phone || "-"}</div>
+                                                    </td>
+                                                    <td className="px-6 py-4">
+                                                        <span className="px-2 py-1 bg-slate-900 border border-slate-800 rounded-md text-xs font-medium text-slate-300">
+                                                            {t.subject || "General"}
+                                                        </span>
+                                                    </td>
+                                                    <td className="px-6 py-4">
+                                                        <div className="flex flex-wrap gap-1 max-w-[200px]">
+                                                            {t.assignedClasses && t.assignedClasses.length > 0 ? (
+                                                                t.assignedClasses.map(cid => (
+                                                                    <span key={cid} className="px-1.5 py-0.5 bg-indigo-950/40 border border-indigo-900/40 text-[10px] font-semibold text-indigo-300 rounded">
+                                                                        {classLookup[cid] || `#${cid}`}
+                                                                    </span>
+                                                                ))
+                                                            ) : (
+                                                                <span className="text-xs text-slate-500 italic">No classes assigned</span>
+                                                            )}
+                                                        </div>
+                                                    </td>
+                                                    <td className="px-6 py-4 text-center">
+                                                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${t.active ? 'bg-green-500/10 text-green-400 border border-green-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'}`}>
+                                                            {t.active ? "Active" : "Suspended"}
+                                                        </span>
+                                                    </td>
+                                                    <td className="px-6 py-4 text-right space-x-1.5">
+                                                        <button onClick={() => handleResetPassword(t.teacherId)} title="Reset Password" className="p-1.5 bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800 hover:border-slate-700 rounded transition-all">
+                                                            <i className="fa-solid fa-key text-xs"></i>
+                                                        </button>
+                                                        <button onClick={() => handleEdit(t)} className="p-1.5 bg-slate-900 text-indigo-400 hover:text-indigo-300 border border-slate-800 hover:border-slate-700 rounded transition-all">
+                                                            <i className="fa-solid fa-pencil text-xs"></i>
+                                                        </button>
+                                                        <button onClick={() => handleDelete(t.teacherId)} className="p-1.5 bg-slate-900 text-red-400 hover:text-red-300 border border-slate-800 hover:border-slate-700 rounded transition-all">
+                                                            <i className="fa-solid fa-trash text-xs"></i>
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                            ))
+                                        ) : (
+                                            <tr>
+                                                <td colSpan="6" className="px-6 py-12 text-center text-slate-500 italic">No teachers found in the system database.</td>
+                                            </tr>
+                                        )}
+                                    </tbody>
+                                </table>
+                            ) : (
+                                <table className="min-w-full divide-y divide-slate-900 text-left text-sm">
+                                    <thead className="bg-slate-950/50 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                                        <tr>
+                                            <th className="px-6 py-4">Roll Num / Name</th>
+                                            <th className="px-6 py-4">Email / Phone</th>
+                                            <th className="px-6 py-4">Assigned Classroom</th>
+                                            <th className="px-6 py-4 text-center">Status</th>
+                                            <th className="px-6 py-4 text-right">Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-900 bg-slate-950/10">
+                                        {students.length > 0 ? (
+                                            students.map((s) => (
+                                                <tr key={s.studentId} className="hover:bg-slate-900/30 transition-colors">
+                                                    <td className="px-6 py-4">
+                                                        <div className="font-bold text-slate-200">{s.fullName}</div>
+                                                        <div className="text-xs text-indigo-400 font-mono mt-0.5">Roll: {s.rollNumber || "N/A"}</div>
+                                                    </td>
+                                                    <td className="px-6 py-4">
+                                                        <div className="text-slate-300">{s.email}</div>
+                                                        <div className="text-xs text-slate-500 mt-0.5">{s.phone || "-"}</div>
+                                                    </td>
+                                                    <td className="px-6 py-4">
+                                                        <span className="px-2.5 py-1 bg-indigo-950/40 border border-indigo-900/40 rounded-md text-xs font-semibold text-indigo-300">
+                                                            {classLookup[s.classId] || `Class ID #${s.classId}`}
+                                                        </span>
+                                                    </td>
+                                                    <td className="px-6 py-4 text-center">
+                                                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${s.isActive ? 'bg-green-500/10 text-green-400 border border-green-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'}`}>
+                                                            {s.isActive ? "Active" : "Suspended"}
+                                                        </span>
+                                                    </td>
+                                                    <td className="px-6 py-4 text-right space-x-1.5">
+                                                        <button onClick={() => handleResetPassword(s.studentId)} title="Reset Password" className="p-1.5 bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800 hover:border-slate-700 rounded transition-all">
+                                                            <i className="fa-solid fa-key text-xs"></i>
+                                                        </button>
+                                                        <button onClick={() => handleEdit(s)} className="p-1.5 bg-slate-900 text-indigo-400 hover:text-indigo-300 border border-slate-800 hover:border-slate-700 rounded transition-all">
+                                                            <i className="fa-solid fa-pencil text-xs"></i>
+                                                        </button>
+                                                        <button onClick={() => handleDelete(s.studentId)} className="p-1.5 bg-slate-900 text-red-400 hover:text-red-300 border border-slate-800 hover:border-slate-700 rounded transition-all">
+                                                            <i className="fa-solid fa-trash text-xs"></i>
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                            ))
+                                        ) : (
+                                            <tr>
+                                                <td colSpan="5" className="px-6 py-12 text-center text-slate-500 italic">No students found in the database.</td>
+                                            </tr>
+                                        )}
+                                    </tbody>
+                                </table>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Roster Modal */}
+                    {showModal && (
+                        <div className="fixed inset-0 z-50 overflow-y-auto flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
+                            <div className="glass-panel w-full max-w-lg rounded-xl shadow-2xl relative overflow-hidden">
+                                <div className="absolute top-0 left-0 w-full h-[3px] bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500"></div>
+                                <div className="px-6 py-5 border-b border-slate-900 flex justify-between items-center bg-slate-950/30">
+                                    <h3 className="text-lg font-bold font-display text-slate-200">
+                                        {editingUser ? "Edit Roster Profile" : `Register New ${activeTab === 'TEACHER' ? 'Teacher' : 'Student'}`}
+                                    </h3>
+                                    <button onClick={() => setShowModal(false)} className="text-slate-400 hover:text-slate-200">
+                                        <i className="fa-solid fa-xmark"></i>
+                                    </button>
+                                </div>
+                                <form onSubmit={handleCreateOrUpdate} className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-xs font-bold uppercase tracking-wider text-slate-400">Full Name</label>
+                                            <input
+                                                type="text"
+                                                required
+                                                value={fullName}
+                                                onChange={(e) => setFullName(e.target.value)}
+                                                placeholder="e.g. John Doe"
+                                                className="mt-1 block w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 text-sm"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-bold uppercase tracking-wider text-slate-400">Email Address</label>
+                                            <input
+                                                type="email"
+                                                required
+                                                value={email}
+                                                onChange={(e) => setEmail(e.target.value)}
+                                                placeholder="e.g. email@system.com"
+                                                className="mt-1 block w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 text-sm"
+                                            />
+                                        </div>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-xs font-bold uppercase tracking-wider text-slate-400">Phone (Optional)</label>
+                                            <input
+                                                type="text"
+                                                value={phone}
+                                                onChange={(e) => setPhone(e.target.value)}
+                                                placeholder="10 digit number"
+                                                className="mt-1 block w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 text-sm"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-bold uppercase tracking-wider text-slate-400">
+                                                {editingUser ? "Change Password (Leave blank to keep)" : "Password"}
+                                            </label>
+                                            <input
+                                                type="password"
+                                                required={!editingUser}
+                                                value={password}
+                                                onChange={(e) => setPassword(e.target.value)}
+                                                placeholder="Min 8 chars, letter + digit"
+                                                className="mt-1 block w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 text-sm"
+                                            />
+                                        </div>
+                                    </div>
+
+                                    {activeTab === "TEACHER" ? (
+                                        <div className="space-y-4 pt-2 border-t border-slate-900">
+                                            <div className="grid grid-cols-2 gap-4">
+                                                <div>
+                                                    <label className="block text-xs font-bold uppercase tracking-wider text-slate-400">Specialization (Subject)</label>
+                                                    <input
+                                                        type="text"
+                                                        value={subject}
+                                                        onChange={(e) => setSubject(e.target.value)}
+                                                        placeholder="e.g. Mathematics, OS"
+                                                        className="mt-1 block w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 text-sm"
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label className="block text-xs font-bold uppercase tracking-wider text-slate-400">Employee Code</label>
+                                                    <input
+                                                        type="text"
+                                                        required
+                                                        value={employeeCode}
+                                                        onChange={(e) => setEmployeeCode(e.target.value)}
+                                                        placeholder="e.g. EMP1004"
+                                                        className="mt-1 block w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 text-sm"
+                                                    />
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">Class Assignments</label>
+                                                <div className="grid grid-cols-2 gap-2 bg-slate-950 p-4 rounded-lg border border-slate-800 max-h-[150px] overflow-y-auto">
+                                                    {classes.length > 0 ? (
+                                                        classes.map(c => (
+                                                            <div key={c.classId} className="flex items-center space-x-2">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    id={`cls_assign_${c.classId}`}
+                                                                    checked={assignedClasses.includes(c.classId)}
+                                                                    onChange={() => toggleClassAssignment(c.classId)}
+                                                                    className="h-4 w-4 bg-slate-900 border border-slate-800 rounded text-indigo-600 focus:ring-indigo-500"
+                                                                />
+                                                                <label for={`cls_assign_${c.classId}`} className="text-xs text-slate-300 truncate">
+                                                                    {c.className} ({c.section})
+                                                                </label>
+                                                            </div>
+                                                        ))
+                                                    ) : (
+                                                        <span className="text-xs text-slate-500 italic col-span-2">Create classrooms first</span>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <div className="grid grid-cols-2 gap-4 pt-2 border-t border-slate-900">
+                                            <div>
+                                                <label className="block text-xs font-bold uppercase tracking-wider text-slate-400">Roll Number</label>
+                                                <input
+                                                    type="text"
+                                                    required
+                                                    value={rollNumber}
+                                                    onChange={(e) => setRollNumber(e.target.value)}
+                                                    placeholder="e.g. ROLL102"
+                                                    className="mt-1 block w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 text-sm"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-xs font-bold uppercase tracking-wider text-slate-400">Classroom Allocation</label>
+                                                <select
+                                                    required
+                                                    value={classId}
+                                                    onChange={(e) => setClassId(e.target.value)}
+                                                    className="mt-1 block w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 text-sm"
+                                                >
+                                                    <option value="">-- Select Class --</option>
+                                                    {classes.map(c => (
+                                                        <option key={c.classId} value={c.classId}>
+                                                            {c.className} ({c.section})
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {editingUser && (
+                                        <div className="flex items-center space-x-2 pt-2">
+                                            <input
+                                                type="checkbox"
+                                                id="isActive"
+                                                checked={isActive}
+                                                onChange={(e) => setIsActive(e.target.checked)}
+                                                className="h-4 w-4 bg-slate-950 border border-slate-800 rounded text-indigo-600 focus:ring-indigo-500"
+                                            />
+                                            <label for="isActive" className="text-sm font-semibold text-slate-300">Account Active</label>
+                                        </div>
+                                    )}
+
+                                    <div className="flex justify-end space-x-3 pt-4 border-t border-slate-900 mt-6">
+                                        <button
+                                            type="button"
+                                            onClick={() => setShowModal(false)}
+                                            className="py-2 px-4 bg-slate-900 hover:bg-slate-800 border border-slate-800 text-xs font-bold rounded-lg transition-colors text-slate-400 hover:text-slate-200"
+                                        >
+                                            Cancel
+                                        </button>
+                                        <button
+                                            type="submit"
+                                            className="py-2 px-4 text-xs font-bold text-white rounded-lg btn-gradient"
+                                        >
+                                            {editingUser ? "Save Profile" : "Register"}
+                                        </button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        // =========================================================================
+        // TEACHER DASHBOARD
+        // =========================================================================
+        function TeacherDashboard({ apiCall, setView, setCurrentAssignmentId, showAlert }) {
+            const [data, setData] = useState(null);
+            const [loading, setLoading] = useState(true);
+            const [showModal, setShowModal] = useState(false);
+            const [editingAssignment, setEditingAssignment] = useState(null);
+
+            // Form inputs
+            const [title, setTitle] = useState("");
+            const [description, setDescription] = useState("");
+            const [classId, setClassId] = useState("");
+            const [deadline, setDeadline] = useState("");
+            const [maxMarks, setMaxMarks] = useState(100);
+            const [status, setStatus] = useState("ACTIVE");
+            const [fileData, setFileData] = useState({ name: "", base64: "" });
+
+            useEffect(() => {
+                loadDashboard();
+            }, []);
+
+            const loadDashboard = async () => {
+                try {
+                    const res = await apiCall("/teacher/dashboard");
+                    setData(res);
+                } catch (e) {
+                    showAlert(e.message, "error");
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const resetForm = () => {
+                setTitle("");
+                setDescription("");
+                setClassId("");
+                setDeadline("");
+                setMaxMarks(100);
+                setStatus("ACTIVE");
+                setFileData({ name: "", base64: "" });
+                setEditingAssignment(null);
+            };
+
+            const handleFileChange = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = () => {
+                    setFileData({
+                        name: file.name,
+                        base64: reader.result
+                    });
+                };
+                reader.readAsDataURL(file);
+            };
+
+            const handleCreateOrUpdate = async (e) => {
+                e.preventDefault();
+                try {
+                    const payload = {
+                        title,
+                        description,
+                        classId: parseInt(classId),
+                        deadline,
+                        maxMarks: parseInt(maxMarks),
+                        status
+                    };
+
+                    if (fileData.name && fileData.base64) {
+                        payload.fileName = fileData.name;
+                        payload.fileBase64 = fileData.base64;
+                    }
+
+                    if (editingAssignment) {
+                        payload.assignmentId = editingAssignment.assignmentId;
+                        await apiCall("/teacher/assignments", "PUT", payload);
+                        showAlert("Assignment updated successfully!");
+                    } else {
+                        await apiCall("/teacher/assignments", "POST", payload);
+                        showAlert("Assignment published successfully!");
+                    }
+                    setShowModal(false);
+                    resetForm();
+                    loadDashboard();
+                } catch (err) {
+                    showAlert(err.message, "error");
+                }
+            };
+
+            const handleEdit = (a) => {
+                setEditingAssignment(a);
+                setTitle(a.title);
+                setDescription(a.description || "");
+                setClassId(a.classId.toString());
+                
+                // Format deadline for datetime-local input
+                // DB date is "yyyy-MM-dd HH:mm:ss" or standard iso, need "yyyy-MM-ddTHH:mm"
+                let dl = "";
+                if (a.deadline) {
+                    const d = new Date(a.deadline);
+                    const pad = (n) => n.toString().padStart(2, '0');
+                    dl = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+                }
+                setDeadline(dl);
+                setMaxMarks(a.maxMarks);
+                setStatus(a.status);
+                setFileData({ name: "", base64: "" });
+                setShowModal(true);
+            };
+
+            const handleDelete = async (assignmentId) => {
+                if (!confirm("Are you sure you want to delete this assignment and all submissions made to it? This action is irreversible.")) {
+                    return;
+                }
+                try {
+                    await apiCall(`/teacher/assignments?id=${assignmentId}`, "DELETE");
+                    showAlert("Assignment deleted successfully!");
+                    loadDashboard();
+                } catch (err) {
+                    showAlert(err.message, "error");
+                }
+            };
+
+            const handleExtend = async (a) => {
+                const newDl = prompt("Enter new extended deadline (Format: YYYY-MM-DD HH:MM)\nMust be after initial deadline:", a.deadline ? a.deadline.substring(0, 16) : "");
+                if (newDl === null) return;
+                
+                // Convert simple prompt datetime to format backend expects (yyyy-MM-dd'T'HH:mm)
+                const formattedDl = newDl.replace(" ", "T");
+                try {
+                    await apiCall("/teacher/assignments", "PUT", {
+                        assignmentId: a.assignmentId,
+                        title: a.title,
+                        description: a.description,
+                        classId: a.classId,
+                        deadline: formattedDl,
+                        maxMarks: a.maxMarks,
+                        status: a.status
+                    });
+                    showAlert("Deadline extended successfully!");
+                    loadDashboard();
+                } catch (err) {
+                    showAlert(err.message, "error");
+                }
+            };
+
+            const viewSubmissions = (assignmentId) => {
+                setCurrentAssignmentId(assignmentId);
+                setView("submissions");
+            };
+
+            if (loading) return <Loader />;
+
+            const statsList = data?.assignmentsStats || [];
+            const assignedClasses = data?.assignedClasses || [];
+
+            return (
+                <div className="space-y-6">
+                    {/* Header */}
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center space-y-4 sm:space-y-0">
+                        <div>
+                            <h1 className="text-3xl font-extrabold font-display tracking-tight text-slate-100 font-display">Teacher Portal</h1>
+                            <p className="text-slate-400 mt-1">Publish assignments, track student submissions, and grade work.</p>
+                        </div>
+                        <button
+                            onClick={() => { resetForm(); setShowModal(true); }}
+                            className="py-2.5 px-4 text-xs font-bold text-white rounded-lg btn-gradient flex items-center"
+                        >
+                            <i className="fa-solid fa-file-circle-plus mr-1.5"></i> Publish Assignment
+                        </button>
+                    </div>
+
+                    {/* Stats */}
+                    <div className="grid grid-cols-1 gap-5 sm:grid-cols-3">
+                        <StatCard icon="fa-school text-indigo-400" title="Assigned Classes" value={data?.assignedClassesCount} bg="from-indigo-500/10 to-indigo-500/5 border-indigo-500/20" />
+                        <StatCard icon="fa-file-signature text-purple-400" title="Total Assignments" value={data?.totalAssignmentsCount} bg="from-purple-500/10 to-purple-500/5 border-purple-500/20" />
+                        <StatCard icon="fa-envelope-open-text text-pink-400" title="Submissions Received" value={data?.totalSubmissionsCount} bg="from-pink-500/10 to-pink-500/5 border-pink-500/20" />
+                    </div>
+
+                    {/* Classroom Cards Summary */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        {assignedClasses.map(c => {
+                            // Find assignments of this class
+                            const classAssignments = statsList.filter(s => s.assignment.classId === c.classId);
+                            const pendingGradingCount = classAssignments.reduce((acc, curr) => acc + curr.pendingGrading, 0);
+
+                            return (
+                                <div key={c.classId} className="glass-panel p-5 rounded-xl border border-slate-900 space-y-4 bg-slate-950/20">
+                                    <div className="flex justify-between items-start">
+                                        <div>
+                                            <h3 className="text-lg font-bold font-display text-slate-200">{c.className}</h3>
+                                            <p className="text-xs text-slate-500">Section: {c.section} | Year: {c.academicYear}</p>
+                                        </div>
+                                        {pendingGradingCount > 0 && (
+                                            <span className="px-2 py-0.5 bg-red-950 text-red-400 border border-red-900 rounded text-[10px] font-bold animate-pulse">
+                                                {pendingGradingCount} Pending Grade
+                                            </span>
+                                        )}
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-4 text-center border-t border-slate-900 pt-3">
+                                        <div>
+                                            <span className="block text-[10px] uppercase font-bold text-slate-500">Assignments</span>
+                                            <span className="text-lg font-bold text-slate-300">{classAssignments.length}</span>
+                                        </div>
+                                        <div>
+                                            <span className="block text-[10px] uppercase font-bold text-slate-500">Submissions</span>
+                                            <span className="text-lg font-bold text-slate-300">
+                                                {classAssignments.reduce((acc, curr) => acc + curr.submissionCount, 0)}
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+
+                    {/* Assignment Stats List */}
+                    <div className="glass-panel rounded-xl overflow-hidden shadow-xl border border-slate-900">
+                        <div className="px-6 py-4 bg-slate-950/30 border-b border-slate-900 font-bold font-display text-slate-200">
+                            Assignments list & Submissions Status
+                        </div>
+                        <div className="divide-y divide-slate-900">
+                            {statsList.length > 0 ? (
+                                statsList.map((stat) => {
+                                    const a = stat.assignment;
+                                    const submissionRate = stat.totalStudents > 0 
+                                        ? Math.round((stat.submissionCount / stat.totalStudents) * 100) 
+                                        : 0;
+
+                                    return (
+                                        <div key={a.assignmentId} className="p-6 hover:bg-slate-900/10 transition-colors flex flex-col md:flex-row md:items-center justify-between gap-4">
+                                            <div className="space-y-1 md:max-w-md">
+                                                <div className="flex items-center space-x-2">
+                                                    <span className="px-1.5 py-0.5 bg-slate-900 border border-slate-800 text-[10px] font-bold text-indigo-400 rounded">
+                                                        {stat.className}
+                                                    </span>
+                                                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                                                        a.status === 'ACTIVE' ? 'bg-green-950 text-green-400 border border-green-900' : 'bg-slate-900 text-slate-500 border border-slate-800'
+                                                    }`}>
+                                                        {a.status}
+                                                    </span>
+                                                </div>
+                                                <h3 className="text-lg font-bold text-slate-200">{a.title}</h3>
+                                                <p className="text-xs text-slate-400 line-clamp-1">{a.description || "No description provided."}</p>
+                                                <div className="text-xs text-slate-500 flex items-center space-x-3 pt-1">
+                                                    <span><i className="fa-solid fa-calendar mr-1"></i> Due: {a.deadline ? a.deadline.replace("T", " ").substring(0, 16) : "-"}</span>
+                                                    <span><i className="fa-solid fa-clipboard mr-1"></i> Marks: {a.maxMarks}</span>
+                                                </div>
+                                            </div>
+
+                                            {/* Submission Progress bar */}
+                                            <div className="flex items-center space-x-8">
+                                                <div className="w-40 space-y-1">
+                                                    <div className="flex justify-between text-xs font-semibold">
+                                                        <span className="text-slate-400">Submissions</span>
+                                                        <span className="text-slate-300">{stat.submissionCount}/{stat.totalStudents} ({submissionRate}%)</span>
+                                                    </div>
+                                                    <div className="w-full bg-slate-900 rounded-full h-2 overflow-hidden border border-slate-800">
+                                                        <div className="bg-gradient-to-r from-indigo-500 to-purple-500 h-full rounded-full" style={{ width: `${submissionRate}%` }}></div>
+                                                    </div>
+                                                    {stat.pendingGrading > 0 && (
+                                                        <div className="text-[10px] font-bold text-amber-500 flex items-center">
+                                                            <i className="fa-solid fa-circle-exclamation mr-1"></i> {stat.pendingGrading} pending evaluation
+                                                        </div>
+                                                    )}
+                                                </div>
+
+                                                <div className="flex space-x-1">
+                                                    <button onClick={() => viewSubmissions(a.assignmentId)} className="py-2 px-3 bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white rounded-lg transition-colors flex items-center">
+                                                        <i className="fa-solid fa-eye mr-1"></i> Submissions
+                                                    </button>
+                                                    <button onClick={() => handleEdit(a)} title="Edit Assignment" className="p-2 bg-slate-900 text-slate-400 hover:text-slate-200 hover:bg-slate-800 border border-slate-800 rounded-lg transition-colors">
+                                                        <i className="fa-solid fa-pencil text-xs"></i>
+                                                    </button>
+                                                    <button onClick={() => handleExtend(a)} title="Extend Deadline" className="p-2 bg-slate-900 text-slate-400 hover:text-slate-200 hover:bg-slate-800 border border-slate-800 rounded-lg transition-colors">
+                                                        <i className="fa-solid fa-calendar-plus text-xs"></i>
+                                                    </button>
+                                                    <button onClick={() => handleDelete(a.assignmentId)} title="Delete" className="p-2 bg-slate-900 text-red-400 hover:text-red-300 hover:bg-slate-800 border border-slate-800 rounded-lg transition-colors">
+                                                        <i className="fa-solid fa-trash text-xs"></i>
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    );
+                                })
+                            ) : (
+                                <div className="p-8 text-center text-slate-500">No assignments created yet. Click "Publish Assignment" to start.</div>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Assignment Modal */}
+                    {showModal && (
+                        <div className="fixed inset-0 z-50 overflow-y-auto flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
+                            <div className="glass-panel w-full max-w-lg rounded-xl shadow-2xl relative overflow-hidden">
+                                <div className="absolute top-0 left-0 w-full h-[3px] bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500"></div>
+                                <div className="px-6 py-5 border-b border-slate-900 flex justify-between items-center bg-slate-950/30">
+                                    <h3 className="text-lg font-bold font-display text-slate-200">
+                                        {editingAssignment ? "Edit Assignment" : "Publish Assignment"}
+                                    </h3>
+                                    <button onClick={() => setShowModal(false)} className="text-slate-400 hover:text-slate-200">
+                                        <i className="fa-solid fa-xmark"></i>
+                                    </button>
+                                </div>
+                                <form onSubmit={handleCreateOrUpdate} className="p-6 space-y-4">
+                                    <div>
+                                        <label className="block text-xs font-bold uppercase tracking-wider text-slate-400">Assignment Title</label>
+                                        <input
+                                            type="text"
+                                            required
+                                            value={title}
+                                            onChange={(e) => setTitle(e.target.value)}
+                                            placeholder="e.g. OS Memory Management Lab"
+                                            className="mt-1 block w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 text-sm"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold uppercase tracking-wider text-slate-400">Instructions / Description</label>
+                                        <textarea
+                                            value={description}
+                                            onChange={(e) => setDescription(e.target.value)}
+                                            rows="4"
+                                            placeholder="Describe the homework details..."
+                                            className="mt-1 block w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 text-sm"
+                                        ></textarea>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-xs font-bold uppercase tracking-wider text-slate-400">Classroom Allocation</label>
+                                            <select
+                                                required
+                                                value={classId}
+                                                onChange={(e) => setClassId(e.target.value)}
+                                                className="mt-1 block w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 text-sm"
+                                            >
+                                                <option value="">-- Select Class --</option>
+                                                {assignedClasses.map(c => (
+                                                    <option key={c.classId} value={c.classId}>
+                                                        {c.className} ({c.section})
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-bold uppercase tracking-wider text-slate-400">Submission Deadline</label>
+                                            <input
+                                                type="datetime-local"
+                                                required
+                                                value={deadline}
+                                                onChange={(e) => setDeadline(e.target.value)}
+                                                className="mt-1 block w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 text-sm"
+                                            />
+                                        </div>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-xs font-bold uppercase tracking-wider text-slate-400">Maximum Marks</label>
+                                            <input
+                                                type="number"
+                                                required
+                                                min="1"
+                                                max="1000"
+                                                value={maxMarks}
+                                                onChange={(e) => setMaxMarks(e.target.value)}
+                                                className="mt-1 block w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 text-sm"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-bold uppercase tracking-wider text-slate-400">Status</label>
+                                            <select
+                                                value={status}
+                                                onChange={(e) => setStatus(e.target.value)}
+                                                className="mt-1 block w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 text-sm"
+                                            >
+                                                <option value="ACTIVE">ACTIVE (Visible to students)</option>
+                                                <option value="DRAFT">DRAFT (Hidden)</option>
+                                            </select>
+                                        </div>
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-xs font-bold uppercase tracking-wider text-slate-400">Attachment File (PDF, DOCX, Images)</label>
+                                        <input
+                                            type="file"
+                                            onChange={handleFileChange}
+                                            className="mt-1 block w-full text-xs text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-xs file:font-bold file:bg-slate-900 file:text-slate-300 file:cursor-pointer hover:file:bg-slate-800 cursor-pointer"
+                                        />
+                                        {fileData.name && (
+                                            <span className="text-xs text-indigo-400 font-semibold block mt-1"><i className="fa-solid fa-paperclip mr-1"></i> Selected: {fileData.name}</span>
+                                        )}
+                                    </div>
+
+                                    <div className="flex justify-end space-x-3 pt-4 border-t border-slate-900 mt-6">
+                                        <button
+                                            type="button"
+                                            onClick={() => setShowModal(false)}
+                                            className="py-2 px-4 bg-slate-900 hover:bg-slate-800 border border-slate-800 text-xs font-bold rounded-lg transition-colors text-slate-400 hover:text-slate-200"
+                                        >
+                                            Cancel
+                                        </button>
+                                        <button
+                                            type="submit"
+                                            className="py-2 px-4 text-xs font-bold text-white rounded-lg btn-gradient"
+                                        >
+                                            {editingAssignment ? "Save Changes" : "Publish"}
+                                        </button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        // =========================================================================
+        // TEACHER EVALUATE SUBMISSIONS LIST
+        // =========================================================================
+        function TeacherSubmissions({ apiCall, assignmentId, setView, showAlert, session }) {
+            const [data, setData] = useState(null);
+            const [loading, setLoading] = useState(true);
+            const [filter, setFilter] = useState("all");
+            const [search, setSearch] = useState("");
+            const [selectedSubmission, setSelectedSubmission] = useState(null);
+
+            // Grading inputs
+            const [marks, setMarks] = useState("");
+            const [feedback, setFeedback] = useState("");
+
+            useEffect(() => {
+                loadSubmissions();
+            }, [filter, search]);
+
+            const loadSubmissions = async () => {
+                setLoading(true);
+                try {
+                    const data = await apiCall(`/teacher/submissions?assignmentId=${assignmentId}&filter=${filter}&search=${encodeURIComponent(search)}`);
+                    setData(data);
+                } catch (e) {
+                    showAlert(e.message, "error");
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const openGradingModal = (sub) => {
+                setSelectedSubmission(sub);
+                setMarks(sub.marks !== null ? sub.marks.toString() : "");
+                setFeedback(sub.feedback || "");
+            };
+
+            const submitGrade = async (e) => {
+                e.preventDefault();
+                try {
+                    await apiCall("/teacher/grade", "POST", {
+                        submissionId: selectedSubmission.submissionId,
+                        marks: marks,
+                        feedback: feedback
+                    });
+                    showAlert("Submission graded and updated!");
+                    setSelectedSubmission(null);
+                    loadSubmissions();
+                } catch (err) {
+                    showAlert(err.message, "error");
+                }
+            };
+
+            if (loading && !data) return <Loader />;
+
+            const assignment = data?.assignment;
+            const roster = data?.roster || [];
+
+            return (
+                <div className="space-y-6">
+                    {/* Header */}
+                    <div className="flex items-center space-x-3">
+                        <button onClick={() => setView("dashboard")} className="p-2 text-slate-400 hover:text-slate-200 bg-slate-900 border border-slate-800 rounded-lg hover:border-slate-700 transition-colors">
+                            <i className="fa-solid fa-arrow-left"></i>
+                        </button>
+                        <div>
+                            <h1 className="text-3xl font-extrabold font-display text-slate-100 tracking-tight">Evaluate Work</h1>
+                            <p className="text-slate-400 mt-1">Assignment: <span className="text-indigo-400 font-semibold">{assignment?.title}</span></p>
+                        </div>
+                    </div>
+
+                    {/* Filters & Search */}
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center space-y-4 sm:space-y-0 bg-slate-950/20 p-4 rounded-xl border border-slate-900 glass-panel">
+                        <div className="flex space-x-2">
+                            {["all", "submitted", "missing"].map((f) => (
+                                <button
+                                    key={f}
+                                    onClick={() => setFilter(f)}
+                                    className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all uppercase tracking-wider ${
+                                        filter === f
+                                            ? "bg-indigo-600/20 border-indigo-500 text-indigo-300"
+                                            : "border-slate-800 bg-slate-950/50 text-slate-400 hover:border-slate-700"
+                                    }`}
+                                >
+                                    {f}
+                                </button>
+                            ))}
+                        </div>
+                        <div className="relative w-full sm:w-64">
+                            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-500">
+                                <i className="fa-solid fa-search text-xs"></i>
+                            </div>
+                            <input
+                                type="text"
+                                placeholder="Search by name or roll number..."
+                                value={search}
+                                onChange={(e) => setSearch(e.target.value)}
+                                className="w-full pl-8 pr-3 py-1.5 bg-slate-950 border border-slate-800 rounded-lg text-slate-200 placeholder-slate-500 focus:outline-none text-xs"
+                            />
+                        </div>
+                    </div>
+
+                    {/* submissions list */}
+                    <div className="glass-panel rounded-xl overflow-hidden shadow-xl border border-slate-900">
+                        <div className="overflow-x-auto">
+                            <table className="min-w-full divide-y divide-slate-900 text-left text-sm">
+                                <thead className="bg-slate-950/50 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                                    <tr>
+                                        <th className="px-6 py-4">Student</th>
+                                        <th className="px-6 py-4">File Name</th>
+                                        <th className="px-6 py-4">Submitted At</th>
+                                        <th className="px-6 py-4 text-center">Attempts</th>
+                                        <th className="px-6 py-4">Status</th>
+                                        <th className="px-6 py-4">Marks</th>
+                                        <th className="px-6 py-4 text-right">Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-900 bg-slate-950/10">
+                                    {roster.length > 0 ? (
+                                        roster.map((row) => {
+                                            const s = row.student;
+                                            const sub = row.submission;
+
+                                            return (
+                                                <tr key={s.studentId} className="hover:bg-slate-900/30 transition-colors">
+                                                    <td className="px-6 py-4">
+                                                        <div className="font-bold text-slate-200">{s.fullName}</div>
+                                                        <div className="text-xs text-slate-500">Roll: {s.rollNumber}</div>
+                                                    </td>
+                                                    <td className="px-6 py-4">
+                                                        {sub ? (
+                                                            <a
+                                                                href={`${API_URL}/download?id=${sub.submissionId}&type=submission&token=${session.token}`}
+                                                                target="_blank"
+                                                                title="Download Submission"
+                                                                className="text-indigo-400 hover:text-indigo-300 font-semibold flex items-center hover:underline truncate max-w-[200px]"
+                                                            >
+                                                                <i className="fa-solid fa-file-arrow-down mr-1.5"></i> {sub.fileName}
+                                                            </a>
+                                                        ) : (
+                                                            <span className="text-xs text-slate-600">-</span>
+                                                        )}
+                                                    </td>
+                                                    <td className="px-6 py-4">
+                                                        {sub ? (
+                                                            <div className="text-xs text-slate-400">
+                                                                {sub.submittedAt ? sub.submittedAt.replace("T", " ").substring(0, 16) : ""}
+                                                            </div>
+                                                        ) : (
+                                                            <span className="text-xs text-slate-600">-</span>
+                                                        )}
+                                                    </td>
+                                                    <td className="px-6 py-4 text-center text-slate-400 font-bold">
+                                                        {sub ? sub.resubmitCount + 1 : 0}
+                                                    </td>
+                                                    <td className="px-6 py-4">
+                                                        {sub ? (
+                                                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                                                sub.status === 'LATE' ? 'bg-red-500/10 text-red-400 border border-red-500/20' : 'bg-green-500/10 text-green-400 border border-green-500/20'
+                                                            }`}>
+                                                                {sub.status}
+                                                            </span>
+                                                        ) : (
+                                                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-900 text-slate-500 border border-slate-800">
+                                                                MISSING
+                                                            </span>
+                                                        )}
+                                                    </td>
+                                                    <td className="px-6 py-4 font-bold">
+                                                        {sub && sub.marks !== null ? (
+                                                            <span className="text-green-400">{sub.marks} / {assignment?.maxMarks}</span>
+                                                        ) : sub ? (
+                                                            <span className="text-amber-500 text-xs flex items-center"><i className="fa-solid fa-circle-question mr-1"></i> Unevaluated</span>
+                                                        ) : (
+                                                            <span className="text-slate-600">-</span>
+                                                        )}
+                                                    </td>
+                                                    <td className="px-6 py-4 text-right">
+                                                        {sub ? (
+                                                            <button onClick={() => openGradingModal(sub)} className="py-1 px-3 border border-indigo-500/20 hover:border-indigo-500/50 bg-indigo-950/20 hover:bg-indigo-950/40 text-xs font-bold text-indigo-300 rounded-lg transition-colors">
+                                                                Grade
+                                                            </button>
+                                                        ) : (
+                                                            <span className="text-xs text-slate-600">-</span>
+                                                        )}
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })
+                                    ) : (
+                                        <tr>
+                                            <td colSpan="7" className="px-6 py-12 text-center text-slate-500 italic">No submissions match the current filters.</td>
+                                        </tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    {/* Grading Modal */}
+                    {selectedSubmission && (
+                        <div className="fixed inset-0 z-50 overflow-y-auto flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
+                            <div className="glass-panel w-full max-w-md rounded-xl shadow-2xl relative overflow-hidden">
+                                <div className="absolute top-0 left-0 w-full h-[3px] bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500"></div>
+                                <div className="px-6 py-5 border-b border-slate-900 flex justify-between items-center bg-slate-950/30">
+                                    <h3 className="text-lg font-bold font-display text-slate-200">
+                                        Grade Homework Submission
+                                    </h3>
+                                    <button onClick={() => setSelectedSubmission(null)} className="text-slate-400 hover:text-slate-200">
+                                        <i className="fa-solid fa-xmark"></i>
+                                    </button>
+                                </div>
+                                <form onSubmit={submitGrade} className="p-6 space-y-4">
+                                    <div>
+                                        <label className="block text-xs font-bold uppercase tracking-wider text-slate-400">Score Awarded (Max: {assignment?.maxMarks})</label>
+                                        <input
+                                            type="number"
+                                            required
+                                            min="0"
+                                            max={assignment?.maxMarks}
+                                            step="0.5"
+                                            value={marks}
+                                            onChange={(e) => setMarks(e.target.value)}
+                                            placeholder="Enter marks"
+                                            className="mt-1 block w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 text-sm"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold uppercase tracking-wider text-slate-400">Feedback / Comments</label>
+                                        <textarea
+                                            value={feedback}
+                                            onChange={(e) => setFeedback(e.target.value)}
+                                            rows="4"
+                                            placeholder="Add constructive comments for the student..."
+                                            className="mt-1 block w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 text-sm"
+                                        ></textarea>
+                                    </div>
+                                    <div className="flex justify-end space-x-3 pt-4 border-t border-slate-900 mt-6">
+                                        <button
+                                            type="button"
+                                            onClick={() => setSelectedSubmission(null)}
+                                            className="py-2 px-4 bg-slate-900 hover:bg-slate-800 border border-slate-800 text-xs font-bold rounded-lg transition-colors text-slate-400 hover:text-slate-200"
+                                        >
+                                            Cancel
+                                        </button>
+                                        <button
+                                            type="submit"
+                                            className="py-2 px-4 text-xs font-bold text-white rounded-lg btn-gradient"
+                                        >
+                                            Grade & Save
+                                        </button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        // =========================================================================
+        // STUDENT DASHBOARD
+        // =========================================================================
+        function StudentDashboard({ apiCall, showAlert, session }) {
+            const [data, setData] = useState(null);
+            const [loading, setLoading] = useState(true);
+            const [selectedAssignmentStat, setSelectedAssignmentStat] = useState(null);
+            const [fileData, setFileData] = useState({ name: "", base64: "" });
+            const [submitting, setSubmitting] = useState(false);
+
+            useEffect(() => {
+                loadDashboard();
+            }, []);
+
+            const loadDashboard = async () => {
+                try {
+                    const res = await apiCall("/student/dashboard");
+                    setData(res);
+                } catch (e) {
+                    showAlert(e.message, "error");
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const handleFileChange = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = () => {
+                    setFileData({
+                        name: file.name,
+                        base64: reader.result
+                    });
+                };
+                reader.readAsDataURL(file);
+            };
+
+            const handleUpload = async (e) => {
+                e.preventDefault();
+                if (!fileData.name || !fileData.base64) {
+                    showAlert("Please select a file to submit.", "error");
+                    return;
+                }
+                setSubmitting(true);
+                try {
+                    await apiCall("/student/submit", "POST", {
+                        assignmentId: selectedAssignmentStat.assignment.assignmentId,
+                        fileName: fileData.name,
+                        fileBase64: fileData.base64
+                    });
+                    showAlert("Assignment submitted successfully!");
+                    setSelectedAssignmentStat(null);
+                    setFileData({ name: "", base64: "" });
+                    loadDashboard();
+                } catch (err) {
+                    showAlert(err.message, "error");
+                } finally {
+                    setSubmitting(false);
+                }
+            };
+
+            const openSubmitModal = (stat) => {
+                setSelectedAssignmentStat(stat);
+                setFileData({ name: "", base64: "" });
+            };
+
+            if (loading) return <Loader />;
+
+            const statsList = data?.assignmentsStats || [];
+
+            return (
+                <div className="space-y-6">
+                    {/* Header */}
+                    <div>
+                        <h1 className="text-3xl font-extrabold font-display tracking-tight text-slate-100 font-display">Student Workspace</h1>
+                        <p className="text-slate-400 mt-1">Review assignments, check deadlines, submit homework, and view teacher feedback.</p>
+                    </div>
+
+                    {/* Stats Grid */}
+                    <div className="grid grid-cols-1 gap-5 sm:grid-cols-4">
+                        <StatCard icon="fa-clipboard text-indigo-400" title="Assigned Homework" value={data?.totalAssignmentsCount} bg="from-indigo-500/10 to-indigo-500/5 border-indigo-500/20" />
+                        <StatCard icon="fa-circle-check text-green-400" title="Submitted Work" value={data?.submittedCount} bg="from-green-500/10 to-green-500/5 border-green-500/20" />
+                        <StatCard icon="fa-hourglass-half text-amber-400" title="Pending Submissions" value={data?.pendingCount} bg="from-amber-500/10 to-amber-500/5 border-amber-500/20" />
+                        <StatCard icon="fa-triangle-exclamation text-red-400" title="Missing Deadlines" value={data?.missingCount} bg="from-red-500/10 to-red-500/5 border-red-500/20" />
+                    </div>
+
+                    {/* Assignments List */}
+                    <div className="glass-panel rounded-xl overflow-hidden shadow-xl border border-slate-900">
+                        <div className="px-6 py-4 bg-slate-950/30 border-b border-slate-900 font-bold font-display text-slate-200">
+                            Class Assignments
+                        </div>
+                        <div className="divide-y divide-slate-900">
+                            {statsList.length > 0 ? (
+                                statsList.map((stat) => {
+                                    const a = stat.assignment;
+                                    const sub = stat.submission;
+                                    const status = stat.status; // SUBMITTED, LATE, MISSING, PENDING
+                                    const isReupload = stat.isReuploadAllowed;
+
+                                    return (
+                                        <div key={a.assignmentId} className="p-6 hover:bg-slate-900/10 transition-colors flex flex-col md:flex-row md:items-center justify-between gap-6">
+                                            <div className="space-y-2 md:max-w-xl">
+                                                <div className="flex items-center space-x-2">
+                                                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                                        status === 'SUBMITTED' ? 'bg-green-950 text-green-400 border border-green-900' :
+                                                        status === 'LATE' ? 'bg-amber-950 text-amber-400 border border-amber-900' :
+                                                        status === 'MISSING' ? 'bg-red-950 text-red-400 border border-red-900' :
+                                                        'bg-indigo-950 text-indigo-400 border border-indigo-900'
+                                                    }`}>
+                                                        {status}
+                                                    </span>
+                                                </div>
+                                                <h3 className="text-xl font-bold text-slate-200">{a.title}</h3>
+                                                <p className="text-xs text-slate-400 leading-relaxed">{a.description || "No description provided."}</p>
+                                                
+                                                {/* Attachment File */}
+                                                {a.filePath && (
+                                                    <div className="pt-1">
+                                                        <a
+                                                            href={`${API_URL}/download?id=${a.assignmentId}&type=assignment&token=${session.token}`}
+                                                            target="_blank"
+                                                            className="text-indigo-400 hover:text-indigo-300 text-xs font-semibold hover:underline inline-flex items-center"
+                                                        >
+                                                            <i className="fa-solid fa-paperclip mr-1.5"></i> Reference: {a.fileName}
+                                                        </a>
+                                                    </div>
+                                                )}
+
+                                                <div className="text-xs text-slate-500 flex flex-wrap gap-4 pt-1 border-t border-slate-900/40">
+                                                    <span><i className="fa-solid fa-calendar mr-1"></i> Due: {a.deadline ? a.deadline.replace("T", " ").substring(0, 16) : "-"}</span>
+                                                    <span><i className="fa-solid fa-clipboard mr-1"></i> Max Score: {a.maxMarks}</span>
+                                                    {sub && sub.marks !== null && (
+                                                        <span className="text-green-400 font-bold"><i className="fa-solid fa-star mr-1"></i> Graded: {sub.marks} / {a.maxMarks}</span>
+                                                    )}
+                                                </div>
+
+                                                {sub && sub.feedback && (
+                                                    <div className="text-xs bg-slate-950/60 p-3 rounded-lg border border-slate-900 mt-2">
+                                                        <span className="block uppercase font-bold text-[10px] text-slate-500 mb-1"><i className="fa-solid fa-comment mr-1"></i> Teacher Feedback</span>
+                                                        <p className="text-slate-300 font-medium">{sub.feedback}</p>
+                                                    </div>
+                                                )}
+                                            </div>
+
+                                            {/* Action Button */}
+                                            <div className="flex-shrink-0">
+                                                {!sub ? (
+                                                    status === "MISSING" ? (
+                                                        <span className="text-xs text-red-400 font-bold"><i className="fa-solid fa-circle-exclamation mr-1"></i> Submissions Closed</span>
+                                                    ) : (
+                                                        <button onClick={() => openSubmitModal(stat)} className="py-2 px-4 text-xs font-bold text-white rounded-lg btn-gradient flex items-center">
+                                                            <i className="fa-solid fa-upload mr-1.5"></i> Submit Homework
+                                                        </button>
+                                                    )
+                                                ) : (
+                                                    <div className="text-right space-y-2">
+                                                        <div className="text-xs text-slate-400">
+                                                            Submitted: <span className="text-indigo-400 font-semibold">{sub.fileName}</span>
+                                                        </div>
+                                                        {isReupload ? (
+                                                            <button onClick={() => openSubmitModal(stat)} className="py-1.5 px-3 border border-indigo-500/20 hover:border-indigo-500/40 bg-indigo-950/20 text-xs font-bold text-indigo-300 rounded-lg transition-colors">
+                                                                <i className="fa-solid fa-arrows-rotate mr-1"></i> Re-submit file
+                                                            </button>
+                                                        ) : (
+                                                            <span className="text-[10px] text-slate-500 block italic">Re-upload locked (30-min window passed)</span>
+                                                        )}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    );
+                                })
+                            ) : (
+                                <div className="p-8 text-center text-slate-500">No assignments have been published for your class yet.</div>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Submit Homework Modal */}
+                    {selectedAssignmentStat && (
+                        <div className="fixed inset-0 z-50 overflow-y-auto flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
+                            <div className="glass-panel w-full max-w-md rounded-xl shadow-2xl relative overflow-hidden">
+                                <div className="absolute top-0 left-0 w-full h-[3px] bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500"></div>
+                                <div className="px-6 py-5 border-b border-slate-900 flex justify-between items-center bg-slate-950/30">
+                                    <h3 className="text-lg font-bold font-display text-slate-200">
+                                        {selectedAssignmentStat.submission ? "Re-upload Homework File" : "Submit Homework File"}
+                                    </h3>
+                                    <button onClick={() => setSelectedAssignmentStat(null)} className="text-slate-400 hover:text-slate-200">
+                                        <i className="fa-solid fa-xmark"></i>
+                                    </button>
+                                </div>
+                                <form onSubmit={handleUpload} className="p-6 space-y-4">
+                                    <div className="text-xs text-slate-400 bg-slate-950/50 p-3 rounded border border-slate-900 space-y-1">
+                                        <div>Assignment: <strong className="text-slate-200">{selectedAssignmentStat.assignment.title}</strong></div>
+                                        <div>Max Marks: <strong className="text-slate-200">{selectedAssignmentStat.assignment.maxMarks}</strong></div>
+                                        <div>Deadline: <strong className="text-slate-200">{selectedAssignmentStat.assignment.deadline ? selectedAssignmentStat.assignment.deadline.replace("T", " ").substring(0, 16) : ""}</strong></div>
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold uppercase tracking-wider text-slate-400">Select Document (PDF, DOCX, Images - Max 10MB)</label>
+                                        <input
+                                            type="file"
+                                            required
+                                            onChange={handleFileChange}
+                                            className="mt-1.5 block w-full text-xs text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-xs file:font-bold file:bg-slate-900 file:text-slate-300 file:cursor-pointer hover:file:bg-slate-800 cursor-pointer"
+                                        />
+                                        {fileData.name && (
+                                            <span className="text-xs text-indigo-400 font-semibold block mt-2"><i className="fa-solid fa-paperclip mr-1"></i> File selected: {fileData.name}</span>
+                                        )}
+                                    </div>
+
+                                    {selectedAssignmentStat.submission && (
+                                        <p className="text-[10px] text-amber-500 font-semibold">
+                                            <i className="fa-solid fa-triangle-exclamation mr-1"></i> Re-uploading will delete your previous submission.
+                                        </p>
+                                    )}
+
+                                    <div className="flex justify-end space-x-3 pt-4 border-t border-slate-900 mt-6">
+                                        <button
+                                            type="button"
+                                            onClick={() => setSelectedAssignmentStat(null)}
+                                            className="py-2 px-4 bg-slate-900 hover:bg-slate-800 border border-slate-800 text-xs font-bold rounded-lg transition-colors text-slate-400 hover:text-slate-200"
+                                        >
+                                            Cancel
+                                        </button>
+                                        <button
+                                            type="submit"
+                                            disabled={submitting}
+                                            className="py-2 px-4 text-xs font-bold text-white rounded-lg btn-gradient flex items-center"
+                                        >
+                                            {submitting ? (
+                                                <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                                </svg>
+                                            ) : null}
+                                            {selectedAssignmentStat.submission ? "Re-upload File" : "Submit File"}
+                                        </button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        // =========================================================================
+        // CHANGE PASSWORD MODAL COMPONENT
+        // =========================================================================
+        function ChangePasswordModal({ apiCall, onClose, showAlert }) {
+            const [oldPassword, setOldPassword] = useState("");
+            const [newPassword, setNewPassword] = useState("");
+            const [confirmPassword, setConfirmPassword] = useState("");
+            const [loading, setLoading] = useState(false);
+
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                if (newPassword !== confirmPassword) {
+                    showAlert("New password and confirmation do not match.", "error");
+                    return;
+                }
+                setLoading(true);
+                try {
+                    await apiCall("/auth/change-password", "POST", {
+                        oldPassword,
+                        newPassword,
+                        confirmPassword
+                    });
+                    showAlert("Password updated successfully!");
+                    onClose();
+                } catch (err) {
+                    showAlert(err.message, "error");
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            return (
+                <div className="fixed inset-0 z-50 overflow-y-auto flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
+                    <div className="glass-panel w-full max-w-sm rounded-xl shadow-2xl relative overflow-hidden">
+                        <div className="absolute top-0 left-0 w-full h-[3px] bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500"></div>
+                        <div className="px-6 py-5 border-b border-slate-900 flex justify-between items-center bg-slate-950/30">
+                            <h3 className="text-lg font-bold font-display text-slate-200">
+                                Change Password
+                            </h3>
+                            <button onClick={onClose} className="text-slate-400 hover:text-slate-200">
+                                <i className="fa-solid fa-xmark"></i>
+                            </button>
+                        </div>
+                        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+                            <div>
+                                <label className="block text-xs font-bold uppercase tracking-wider text-slate-400">Current Password</label>
+                                <input
+                                    type="password"
+                                    required
+                                    value={oldPassword}
+                                    onChange={(e) => setOldPassword(e.target.value)}
+                                    placeholder="Enter current password"
+                                    className="mt-1 block w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 text-sm"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold uppercase tracking-wider text-slate-400">New Password</label>
+                                <input
+                                    type="password"
+                                    required
+                                    value={newPassword}
+                                    onChange={(e) => setNewPassword(e.target.value)}
+                                    placeholder="Min 8 characters (letters + digits)"
+                                    className="mt-1 block w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 text-sm"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold uppercase tracking-wider text-slate-400">Confirm New Password</label>
+                                <input
+                                    type="password"
+                                    required
+                                    value={confirmPassword}
+                                    onChange={(e) => setConfirmPassword(e.target.value)}
+                                    placeholder="Re-enter new password"
+                                    className="mt-1 block w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 text-sm"
+                                />
+                            </div>
+                            <div className="flex justify-end space-x-3 pt-4 border-t border-slate-900 mt-6">
+                                <button
+                                    type="button"
+                                    onClick={onClose}
+                                    className="py-2 px-4 bg-slate-900 hover:bg-slate-800 border border-slate-800 text-xs font-bold rounded-lg transition-colors text-slate-400 hover:text-slate-200"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={loading}
+                                    className="py-2 px-4 text-xs font-bold text-white rounded-lg btn-gradient"
+                                >
+                                    {loading ? "Saving..." : "Change Password"}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            );
+        }
+
+        // =========================================================================
+        // LOADER & LOADER HELPERS
+        // =========================================================================
+        function Loader() {
+            return (
+                <div className="h-[60vh] flex flex-col justify-center items-center space-y-4">
+                    <svg className="animate-spin h-10 w-10 text-indigo-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    <span className="text-sm font-semibold text-slate-400">Loading details from server database...</span>
+                </div>
+            );
+        }
+
+        // Render Application
+        const root = ReactDOM.createRoot(document.getElementById("root"));
+        root.render(<App />);
+    </script>
+
+    <!-- Manually compile and execute JSX to handle any compilation/runtime errors cleanly -->
+    <script>
+        try {
+            const src = document.getElementById("react-src").textContent;
+            const compiled = Babel.transform(src, {
+                presets: [
+                    ["react", { runtime: "classic" }]
+                ]
+            }).code;
+            const script = document.createElement("script");
+            script.text = compiled;
+            document.body.appendChild(script);
+        } catch (err) {
+            console.error("React/Babel Compiling Error:", err);
+            const rootEl = document.getElementById("root");
+            if (rootEl) {
+                rootEl.innerHTML = `
+                    <div style="padding: 24px; color: #f87171; background: rgba(127, 29, 29, 0.4); border: 1px solid rgba(248, 113, 113, 0.2); backdrop-filter: blur(12px); border-radius: 12px; margin: 40px auto; max-width: 600px; font-family: sans-serif; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);">
+                        <h3 style="margin-top: 0; color: #fca5a5; font-size: 1.25rem;">React Application Compilation Error</h3>
+                        <p style="font-size: 0.875rem; color: #fecaca; margin-bottom: 12px;">The browser-side Babel compiler failed to transpile the React JSX source code:</p>
+                        <pre style="white-space: pre-wrap; margin: 0; padding: 12px; background: #0f172a; border-radius: 8px; font-size: 0.75rem; font-family: monospace; color: #e2e8f0; border: 1px solid #334155; line-height: 1.5; max-height: 300px; overflow-y: auto;">${err.message}</pre>
+                        <div style="margin-top: 16px; font-size: 0.75rem; color: #94a3b8;">Please verify the browser console for complete diagnostic stack traces.</div>
+                    </div>
+                `;
+            }
+        }
+    </script>
+</body>
+</html>

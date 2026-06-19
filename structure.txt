@@ -1,0 +1,57 @@
+SmartAssignment Project Structure 
+=================================================================
+
+sample/
+├── compile_and_run.bat
+├── database
+│   ├── schema.sql
+│   └── seed.sql
+├── frontend
+│   └── index.html
+├── lib
+│   ├── logback-classic-1.4.11.jar
+│   ├── logback-core-1.4.11.jar
+│   ├── mysql-connector-j-8.0.33.jar
+│   └── slf4j-api-2.0.9.jar
+├── run_frontend.bat
+├── src
+│   └── main
+│       ├── java
+│       │   └── com
+│       │       └── smartassignment
+│       │           ├── dao
+│       │           │   ├── ActivityLogDAO.java
+│       │           │   ├── ActivityLogDAOImpl.java
+│       │           │   ├── AdminDAO.java
+│       │           │   ├── AdminDAOImpl.java
+│       │           │   ├── AssignmentDAO.java
+│       │           │   ├── AssignmentDAOImpl.java
+│       │           │   ├── ClassRoomDAO.java
+│       │           │   ├── ClassRoomDAOImpl.java
+│       │           │   ├── StudentDAO.java
+│       │           │   ├── StudentDAOImpl.java
+│       │           │   ├── SubmissionDAO.java
+│       │           │   ├── SubmissionDAOImpl.java
+│       │           │   ├── TeacherDAO.java
+│       │           │   └── TeacherDAOImpl.java
+│       │           ├── model
+│       │           │   ├── ActivityLog.java
+│       │           │   ├── Admin.java
+│       │           │   ├── Assignment.java
+│       │           │   ├── ClassRoom.java
+│       │           │   ├── Student.java
+│       │           │   ├── Submission.java
+│       │           │   └── Teacher.java
+│       │           ├── server
+│       │           │   ├── AppServer.java
+│       │           │   └── SessionManager.java
+│       │           └── util
+│       │               ├── DBConnection.java
+│       │               ├── DateUtil.java
+│       │               ├── FileUploadUtil.java
+│       │               ├── JsonUtil.java
+│       │               ├── PasswordUtil.java
+│       │               └── ValidationUtil.java
+│       └── resources
+│           └── database.properties
+└── structure.txt
