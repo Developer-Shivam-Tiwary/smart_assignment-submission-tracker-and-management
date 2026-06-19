@@ -63,6 +63,9 @@ public class AppServer {
         // File Serving Endpoint
         server.createContext("/api/download", new DownloadHandler());
 
+        // Fallback root context for serving frontend static files
+        server.createContext("/", new StaticFileHandler());
+
         server.setExecutor(null); // use default executor
         System.out.println("=================================================");
         System.out.println(" Smart Assignment Submission & Tracking System   ");
@@ -1399,6 +1402,57 @@ public class AppServer {
                 }
             } catch (Exception e) {
                 sendResponse(exchange, 500, "{\"error\": \"Server error during file download.\"}");
+            }
+        }
+    }
+
+    static class StaticFileHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if (handleOptions(exchange)) return;
+            if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
+                sendResponse(exchange, 405, "{\"error\": \"Method not allowed\"}");
+                return;
+            }
+
+            String path = exchange.getRequestURI().getPath();
+            if (path.equals("/")) {
+                path = "/index.html";
+            }
+
+            // Prevent path traversal
+            if (path.contains("..")) {
+                sendResponse(exchange, 403, "{\"error\": \"Forbidden\"}");
+                return;
+            }
+
+            File file = new File("frontend" + path);
+            if (!file.exists() || file.isDirectory()) {
+                sendResponse(exchange, 404, "{\"error\": \"File not found\"}");
+                return;
+            }
+
+            String contentType = "text/plain";
+            String lower = path.toLowerCase();
+            if (lower.endsWith(".html")) contentType = "text/html";
+            else if (lower.endsWith(".css")) contentType = "text/css";
+            else if (lower.endsWith(".js")) contentType = "application/javascript";
+            else if (lower.endsWith(".png")) contentType = "image/png";
+            else if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) contentType = "image/jpeg";
+            else if (lower.endsWith(".gif")) contentType = "image/gif";
+            else if (lower.endsWith(".svg")) contentType = "image/svg+xml";
+
+            exchange.getResponseHeaders().set("Content-Type", contentType);
+            exchange.getResponseHeaders().set("Access-Control-Allow-Origin", "*");
+
+            byte[] bytes = new byte[(int) file.length()];
+            try (FileInputStream fis = new FileInputStream(file)) {
+                int read = fis.read(bytes);
+            }
+
+            exchange.sendResponseHeaders(200, bytes.length);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(bytes);
             }
         }
     }

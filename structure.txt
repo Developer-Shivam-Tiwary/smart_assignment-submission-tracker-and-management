@@ -1,7 +1,8 @@
 SmartAssignment Project Structure 
 =================================================================
 
-sample/
+smartassignmentsubmission/
+├── compile.bat
 ├── compile_and_run.bat
 ├── database
 │   ├── schema.sql
